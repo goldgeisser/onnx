@@ -5,10 +5,12 @@
 #include <unordered_map>
 
 #include "onnx/checker.h"
+#include "onnx/defs/function.h"
 #include "onnx/defs/schema.h"
 #include "onnx/optimizer/optimize.h"
 #include "onnx/py_utils.h"
 #include "onnx/shape_inference/implementation.h"
+#include "onnx/version_converter/convert.h"
 
 namespace ONNX_NAMESPACE {
 namespace py = pybind11;
@@ -16,6 +18,14 @@ using namespace pybind11::literals;
 
 PYBIND11_MODULE(onnx_cpp2py_export, onnx_cpp2py_export) {
   onnx_cpp2py_export.doc() = "Python interface to onnx";
+
+  onnx_cpp2py_export.attr("ONNX_ML") = py::bool_(
+#ifdef ONNX_ML
+      true
+#else // ONNX_ML
+      false
+#endif // ONNX_ML
+  );
 
   // Submodule `schema`
   auto defs = onnx_cpp2py_export.def_submodule("defs");
@@ -28,6 +38,7 @@ PYBIND11_MODULE(onnx_cpp2py_export, onnx_cpp2py_export) {
       .def_property_readonly(
           "doc", &OpSchema::doc, py::return_value_policy::reference)
       .def_property_readonly("since_version", &OpSchema::since_version)
+      .def_property_readonly("deprecated", &OpSchema::deprecated)
       .def_property_readonly("domain", &OpSchema::domain)
       .def_property_readonly("name", &OpSchema::Name)
       .def_property_readonly("min_input", &OpSchema::min_input)
@@ -42,8 +53,15 @@ PYBIND11_MODULE(onnx_cpp2py_export, onnx_cpp2py_export) {
           &OpSchema::has_type_and_shape_inference_function)
       .def_property_readonly(
           "type_constraints", &OpSchema::typeConstraintParams)
-      .def_static("is_infinite", [](int v) {
-        return v == std::numeric_limits<int>::max();
+      .def_static(
+          "is_infinite",
+          [](int v) { return v == std::numeric_limits<int>::max(); })
+      .def_property_readonly("has_function", &OpSchema::HasFunction)
+      .def_property_readonly("_function_body", [](OpSchema* op) -> py::bytes {
+        std::string bytes = "";
+        if (op->HasFunction())
+          op->GetFunction()->SerializeToString(&bytes);
+        return py::bytes(bytes);
       });
 
   py::class_<OpSchema::Attribute>(op_schema, "Attribute")
@@ -78,7 +96,9 @@ PYBIND11_MODULE(onnx_cpp2py_export, onnx_cpp2py_export) {
       .def_property_readonly("typeStr", &OpSchema::FormalParameter::GetTypeStr)
       .def_property_readonly(
           "description", &OpSchema::FormalParameter::GetDescription)
-      .def_property_readonly("option", &OpSchema::FormalParameter::GetOption);
+      .def_property_readonly("option", &OpSchema::FormalParameter::GetOption)
+      .def_property_readonly(
+          "isHomogeneous", &OpSchema::FormalParameter::GetIsHomogeneous);
 
   py::enum_<AttributeProto::AttributeType>(op_schema, "AttrType")
       .value("FLOAT", AttributeProto::FLOAT)
@@ -90,7 +110,9 @@ PYBIND11_MODULE(onnx_cpp2py_export, onnx_cpp2py_export) {
       .value("INTS", AttributeProto::INTS)
       .value("STRINGS", AttributeProto::STRINGS)
       .value("TENSORS", AttributeProto::TENSORS)
-      .value("GRAPHS", AttributeProto::GRAPHS);
+      .value("GRAPHS", AttributeProto::GRAPHS)
+      .value("SPARSE_TENSOR", AttributeProto::SPARSE_TENSOR)
+      .value("SPARSE_TENSORS", AttributeProto::SPARSE_TENSORS);
 
   py::enum_<OpSchema::SupportType>(op_schema, "SupportType")
       .value("COMMON", OpSchema::SupportType::COMMON)
@@ -181,6 +203,14 @@ PYBIND11_MODULE(onnx_cpp2py_export, onnx_cpp2py_export) {
       });
 
   checker.def(
+      "check_sparse_tensor",
+      [](const py::bytes& bytes, const checker::CheckerContext& ctx) -> void {
+        SparseTensorProto proto{};
+        ParseProtoFromPyBytes(&proto, bytes);
+        checker::check_sparse_tensor(proto, ctx);
+      });
+
+  checker.def(
       "check_attribute",
       [](const py::bytes& bytes, const checker::CheckerContext& ctx) -> void {
         AttributeProto proto{};
@@ -212,6 +242,10 @@ PYBIND11_MODULE(onnx_cpp2py_export, onnx_cpp2py_export) {
     checker::check_model(proto);
   });
 
+  checker.def(
+      "check_model_path",
+      (void (*)(const std::string&)) & checker::check_model);
+
   // Submodule `optimizer`
   auto optimizer = onnx_cpp2py_export.def_submodule("optimizer");
   optimizer.doc() = "Optimizer submodule";
@@ -222,6 +256,35 @@ PYBIND11_MODULE(onnx_cpp2py_export, onnx_cpp2py_export) {
         ModelProto proto{};
         ParseProtoFromPyBytes(&proto, bytes);
         auto const result = optimization::Optimize(std::move(proto), names);
+        std::string out;
+        result.SerializeToString(&out);
+        return py::bytes(out);
+      });
+
+  optimizer.def(
+      "optimize_fixedpoint",
+      [](const py::bytes& bytes, const std::vector<std::string>& names) {
+        ModelProto proto{};
+        ParseProtoFromPyBytes(&proto, bytes);
+        auto const result =
+            optimization::OptimizeFixed(std::move(proto), names);
+        std::string out;
+        result.SerializeToString(&out);
+        return py::bytes(out);
+      });
+  optimizer.def("get_available_passes", &optimization::GetAvailablePasses);
+
+  // Submodule `version_converter`
+  auto version_converter =
+      onnx_cpp2py_export.def_submodule("version_converter");
+  version_converter.doc() = "VersionConverter submodule";
+
+  version_converter.def(
+      "convert_version", [](const py::bytes& bytes, py::int_ target) {
+        ModelProto proto{};
+        ParseProtoFromPyBytes(&proto, bytes);
+        shape_inference::InferShapes(proto);
+        auto result = version_conversion::ConvertVersion(proto, target);
         std::string out;
         result.SerializeToString(&out);
         return py::bytes(out);
