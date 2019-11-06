@@ -5,9 +5,11 @@
 Handling Dynamic shapes in accelerated devices is a challenging task – different vendors may implement different solutions.  The goal of this discussion is to propose a uniform handling of Dynamic Shapes among all vendors. 
 
 We propose to implement a flag/option that would enable the vendors replaces a dynamically shaped output with a statically defined shape. The issue involves three different cases:
+
 •	inferable,
 •	non-inferable
 •	dynamic inputs (to the model).
+
 Inferable operators like shape, slice and resize are arguably the easiest to handle. An acceptable example of dealing with them is the approach by Tensor RT version 6.
 The other two test cases are more challenging. Non-inferable operator’s output depends on the content of the input as in the case of NonZeros, Unique and NMS operations and dynamic input affect the entire intermediate model’s tensors. In this proposal we would like to discuss all three cases.
 
