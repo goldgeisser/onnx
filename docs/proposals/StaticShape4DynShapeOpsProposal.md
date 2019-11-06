@@ -11,6 +11,7 @@ We propose to implement a flag/option that would enable the vendors replaces a d
 #### •	dynamic inputs (to the model).
 
 Inferable operators like shape, slice and resize are arguably the easiest to handle. An acceptable example of dealing with them is the approach by Tensor RT version 6.
+
 The other two test cases are more challenging. Non-inferable operator’s output depends on the content of the input as in the case of NonZeros, Unique and NMS operations and dynamic input affect the entire intermediate model’s tensors. In this proposal we would like to discuss all three cases.
 
 ## Implementation Considerations and Discussion:
